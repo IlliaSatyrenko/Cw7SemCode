@@ -71,27 +71,15 @@ public class SimModel {
     }
 
     public record SampleStats(int count, double mean, double std, double min, double max) {
-        public static SampleStats of(List<Double> values) {
-            int n = values.size();
-            if (n == 0) {
+        public static SampleStats fromSums(int count, double sum, double sumSq, double min, double max) {
+            if (count == 0) {
                 return new SampleStats(0, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
             }
-            double sum = 0.0;
-            double min = Double.POSITIVE_INFINITY;
-            double max = Double.NEGATIVE_INFINITY;
-            for (double v : values) {
-                sum += v;
-                if (v < min) min = v;
-                if (v > max) max = v;
-            }
-            double mean = sum / n;
-            double varSum = 0.0;
-            for (double v : values) {
-                double d = v - mean;
-                varSum += d * d;
-            }
-            double std = (n > 1) ? Math.sqrt(varSum / (n - 1)) : 0.0;
-            return new SampleStats(n, mean, std, min, max);
+            double mean = sum / count;
+            double variance = (count > 1)
+                    ? Math.max(0.0, (sumSq - count * mean * mean) / (count - 1))
+                    : 0.0;
+            return new SampleStats(count, mean, Math.sqrt(variance), min, max);
         }
     }
 
@@ -290,21 +278,37 @@ public class SimModel {
         int nPaid = 0;
         int nLeft = 0;
         int nTrips = 0;
-        List<Double> serviceTimes = new ArrayList<>();
-        List<Double> waitTimes = new ArrayList<>();
+
+        double servSum = 0.0, servSumSq = 0.0;
+        double servMin = Double.POSITIVE_INFINITY, servMax = Double.NEGATIVE_INFINITY;
+        double waitSum = 0.0, waitSumSq = 0.0;
+        double waitMin = Double.POSITIVE_INFINITY, waitMax = Double.NEGATIVE_INFINITY;
 
         for (int i = 0; i < m; i++) {
             busySum += t[i].getWorkTime() + c[i].getWorkTime();
             nTrips += t[i].getQuantity();
+
+            nPaid += nOut[i].getQuantity();
+            servSum += nOut[i].getServiceSum();
+            servSumSq += nOut[i].getServiceSumSq();
+            servMin = Math.min(servMin, nOut[i].getServiceMin());
+            servMax = Math.max(servMax, nOut[i].getServiceMax());
+
+            waitSum += nOut[i].getWaitSum();
+            waitSumSq += nOut[i].getWaitSumSq();
+            waitMin = Math.min(waitMin, nOut[i].getWaitMin());
+            waitMax = Math.max(waitMax, nOut[i].getWaitMax());
+
             if (variant == 3) {
                 busySum += r[i].getWorkTime();
                 nTrips += r[i].getQuantity();
                 nLeft += zOut[i].getQuantity();
-                waitTimes.addAll(zOut[i].getWaitTimes());
+
+                waitSum += zOut[i].getWaitSum();
+                waitSumSq += zOut[i].getWaitSumSq();
+                waitMin = Math.min(waitMin, zOut[i].getWaitMin());
+                waitMax = Math.max(waitMax, zOut[i].getWaitMax());
             }
-            nPaid += nOut[i].getQuantity();
-            serviceTimes.addAll(nOut[i].getServiceTimes());
-            waitTimes.addAll(nOut[i].getWaitTimes());
         }
 
         int failures = 0;
@@ -320,8 +324,8 @@ public class SimModel {
 
         return new Result(
                 uClerk,
-                SampleStats.of(serviceTimes),
-                SampleStats.of(waitTimes),
+                SampleStats.fromSums(nPaid, servSum, servSumSq, servMin, servMax),
+                SampleStats.fromSums(nPaid + nLeft, waitSum, waitSumSq, waitMin, waitMax),
                 kMean,
                 lMean,
                 nPaid,
